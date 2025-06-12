@@ -659,48 +659,174 @@ void sendStepsData(int steps) {
 }
 ```
 
-## 開發時程
-- 硬體組裝：2-3天
-- 後端建置：2-3天
-- 前端開發：2-3天
-- AI整合：1-2天
-- 測試調整：2-3天
-總計：9-14天
+## 簡化版數據處理方案
 
-## 注意事項
-1. **硬體方面**
-   - 確保電池正確連接
-   - 測試藍牙連接穩定性
-   - 固定好感測器方向
+### 1. 後端簡化版（使用 Express + JSON 文件存储）
+```javascript
+// server.js
+const express = require('express');
+const fs = require('fs');
+const WebSocket = require('ws');
+const SerialPort = require('serialport');
+const app = express();
+const wss = new WebSocket.Server({ port: 8080 });
 
-2. **軟體方面**
-   - 定期備份數據
-   - 處理藍牙斷線情況
-   - 確保 API 安全性
+// 數據存储路徑
+const DATA_FILE = 'steps_data.json';
 
-3. **使用方面**
-   - 定期充電
-   - 保持藍牙開啟
-   - 配戴時保持固定位置
+// 確保數據文件存在
+if (!fs.existsSync(DATA_FILE)) {
+    fs.writeFileSync(DATA_FILE, JSON.stringify([]));
+}
 
-4. **數據傳輸**
-   - 確保藍牙連接穩定
-   - 處理數據接收異常
-   - 定期清理歷史數據
+// 設置藍牙串口
+const port = new SerialPort('/dev/tty.HC-05', {
+    baudRate: 9600,
+    parser: SerialPort.parsers.readline('\n')
+});
 
-5. **圖表顯示**
-   - 自動縮放Y軸範圍
-   - 適當的更新頻率
-   - 資料量過大時的效能優化
+// 讀取歷史數據
+function readStepsData() {
+    try {
+        const data = fs.readFileSync(DATA_FILE);
+        return JSON.parse(data);
+    } catch (error) {
+        console.error('讀取數據失敗:', error);
+        return [];
+    }
+}
 
-6. **AI 分析**
-   - 根據使用者習慣調整建議
-   - 注意數據異常處理
-   - 定期更新分析模型
+// 保存新數據
+function saveStepData(stepData) {
+    try {
+        const data = readStepsData();
+        data.push({
+            ...stepData,
+            timestamp: new Date().toISOString()
+        });
+        // 只保留最近 30 天的數據
+        const recentData = data.slice(-30);
+        fs.writeFileSync(DATA_FILE, JSON.stringify(recentData));
+    } catch (error) {
+        console.error('保存數據失敗:', error);
+    }
+}
 
-## 後續優化方向
-1. 增加電池電量顯示
-2. 改善步數算法準確度
-3. 擴充 AI 建議系統
-4. 加入數據視覺化
-5. 實作離線儲存功能
+// 監聽藍牙數據
+port.on('data', (data) => {
+    try {
+        const stepData = JSON.parse(data);
+        // 儲存數據
+        saveStepData(stepData);
+        // 廣播給所有連接的客戶端
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify(stepData));
+            }
+        });
+    } catch (e) {
+        console.error('數據解析錯誤:', e);
+    }
+});
+
+// API 路由
+app.get('/api/steps', (req, res) => {
+    const data = readStepsData();
+    res.json(data);
+});
+
+app.listen(3000, () => {
+    console.log('伺服器運行於 http://localhost:3000');
+});
+```
+
+### 2. 前端本地存儲
+```javascript
+// app.js
+class StepDataManager {
+    constructor() {
+        this.storageKey = 'stepTrackerData';
+        this.dailyGoal = parseInt(localStorage.getItem('dailyGoal')) || 8000;
+    }
+
+    // 保存每日目標
+    setDailyGoal(goal) {
+        this.dailyGoal = goal;
+        localStorage.setItem('dailyGoal', goal);
+    }
+
+    // 獲取今日數據
+    getTodayData() {
+        const data = this.getAllData();
+        const today = new Date().toDateString();
+        return data[today] || { steps: 0, goal: this.dailyGoal };
+    }
+
+    // 更新步數
+    updateSteps(steps) {
+        const data = this.getAllData();
+        const today = new Date().toDateString();
+        data[today] = {
+            steps: steps,
+            goal: this.dailyGoal,
+            timestamp: new Date().toISOString()
+        };
+        localStorage.setItem(this.storageKey, JSON.stringify(data));
+        this.updateUI(data[today]);
+    }
+
+    // 獲取所有數據
+    getAllData() {
+        const data = localStorage.getItem(this.storageKey);
+        return data ? JSON.parse(data) : {};
+    }
+
+    // 更新界面
+    updateUI(todayData) {
+        document.getElementById('todaySteps').textContent = todayData.steps;
+        const progress = Math.round((todayData.steps / todayData.goal) * 100);
+        document.getElementById('goalProgress').textContent = `${progress}%`;
+        
+        // 更新其他UI元素
+        const calories = Math.round(todayData.steps * 0.04);
+        const activeMinutes = Math.round(todayData.steps / 100);
+        
+        document.getElementById('calories').textContent = `${calories} kcal`;
+        document.getElementById('activeTime').textContent = `${activeMinutes} 分鐘`;
+    }
+}
+
+// 初始化
+const dataManager = new StepDataManager();
+const ws = new WebSocket('ws://localhost:8080');
+
+// 接收實時數據
+ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    dataManager.updateSteps(data.steps);
+    updateChart(data.steps);
+};
+```
+
+### 3. 安裝必要套件
+```bash
+# 安裝基本套件
+npm install express ws serialport
+
+# 啟動服務
+node server.js
+```
+
+### 優點：
+1. 不需要安裝資料庫
+2. 設置簡單
+3. 維護容易
+4. 適合小型應用
+
+### 注意事項：
+1. 定期備份 JSON 文件
+2. 清理過期數據
+3. 監控文件大小
+4. 處理併發寫入
+
+這個方案更適合快速開發和測試。要開始實作嗎？
