@@ -38,6 +38,8 @@ void setup() {
   Serial.begin(115200);
   delay(1000);  // 等待序列埠穩定
 
+  Serial.println("序列埠初始化完成");
+
   mpu.initialize();
   if (mpu.testConnection()) {
     Serial.println(F("MPU6050 初始化成功"));
@@ -45,6 +47,9 @@ void setup() {
     Serial.println(F("MPU6050 連接失敗")); 
     while (1);
   }
+
+  // 發送初始資料
+  Serial.println("{\"type\":\"step_data\",\"steps\":0,\"timestamp\":0}");
 }
 
 void loop() {
@@ -116,8 +121,18 @@ void loop() {
   }
 
   lastZ = avgZ;
+
+  // 每500ms發送一次當前步數和加速度資料，即使沒有新的步數也發送
+  static unsigned long lastUpdateTime = 0;
+  if (now - lastUpdateTime >= 500) {  // 每500ms更新一次
+    String jsonMessage = "{\"type\":\"step_data\",\"steps\":" + String(steps) + 
+                       ",\"accel\":" + String(avgZ) +
+                       ",\"timestamp\":" + String(millis()) + "}";
+    Serial.println(jsonMessage);
+    lastUpdateTime = now;
+  }
   
   // 小延遲以避免讀取過快
-  delay(50);
+  delay(20);
 }
 

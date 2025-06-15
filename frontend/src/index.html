@@ -187,14 +187,13 @@
         let reader;
         let chart;
         let stepsData = [];
-        let lastStepCount = 30;  // 從30步開始計算
-        let initialSteps = 30;   // 初始步數設定
+        let lastStepCount = 0;  // 從0步開始計算
+        let initialSteps = 0;   // 初始步數設定
         
         // 初始化連接狀態
         function initConnection() {
-            document.getElementById('currentSteps').textContent = '0';
-            document.getElementById('lastStepHeight').textContent = '0.00 cm';
-            lastStepCount = 0;
+            document.getElementById('currentSteps').textContent = initialSteps.toString();
+            lastStepCount = initialSteps;  // 從30步開始計算
             stepsData = [];
             if (chart && chart.data) {
                 chart.data.labels = [];
@@ -203,17 +202,60 @@
             }
         }
 
+        // 生成 AI 建議
+        function generateAiSuggestion(currentSteps, stepsData) {
+            const hourlySteps = stepsData.reduce((acc, data) => acc + data.steps, 0);
+            let suggestion = '';
+
+            if (hourlySteps < 100) {
+                suggestion = '您的活動量稍低，建議起身活動一下。適度走動可以促進血液循環，提升工作效率。';
+            } else if (hourlySteps < 300) {
+                suggestion = '維持良好的活動量！建議每小時至少活動5-10分鐘，可以預防久坐帶來的健康問題。';
+            } else {
+                suggestion = '太棒了！您保持著很好的活動量。請記得在運動的同時也要注意適度休息，保持均衡。';
+            }
+
+            const timeStr = new Date().toLocaleTimeString('zh-TW', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
+            document.getElementById('aiSuggestion').innerHTML = `
+                <p><strong>${timeStr} 更新</strong></p>
+                <p>${suggestion}</p>
+                <p>當前累計步數：${currentSteps} 步</p>
+                <p>最近一小時活動量：${hourlySteps} 步</p>
+            `;
+        }
+
+        // 格式化時間
+        function formatHourlyTime(date) {
+            return date.toLocaleTimeString('zh-TW', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
         // 初始化圖表
         function initChart() {
             const ctx = document.getElementById('stepsChart').getContext('2d');
+            const now = new Date();
+            const hourLabels = [];
+            
+            // 生成最近12小時的標籤
+            for (let i = 11; i >= 0; i--) {
+                const time = new Date(now.getTime() - (i * 3600000));
+                hourLabels.push(formatHourlyTime(time));
+            }
+
             chart = new Chart(ctx, {
                 type: 'bar',
                 data: {
-                    labels: [],
+                    labels: hourLabels,
                     datasets: [{
-                        label: '單次步數',
-                        data: [],
-                        backgroundColor: 'rgba(255, 215, 0, 0.6)',  // 使用金黃色
+                        label: '每小時步數',
+                        data: new Array(12).fill(0),  // 初始化12小時的數據
+                        backgroundColor: 'rgba(255, 215, 0, 0.6)',
                         borderColor: 'rgba(255, 215, 0, 1)',
                         borderWidth: 1
                     }]
@@ -224,14 +266,31 @@
                     scales: {
                         y: {
                             beginAtZero: true,
-                            ticks: {
-                                stepSize: 1
+                            title: {
+                                display: true,
+                                text: '步數'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: '時間'
                             }
                         }
                     },
                     plugins: {
                         legend: {
                             display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: (items) => {
+                                    return `時間：${items[0].label}`;
+                                },
+                                label: (item) => {
+                                    return `步數：${item.raw}`;
+                                }
+                            }
                         }
                     }
                 }
@@ -241,11 +300,7 @@
         // 更新圖表數據
         function updateChart(data) {
             const now = new Date();
-            const timeString = now.toLocaleTimeString('zh-TW', { 
-                hour: '2-digit', 
-                minute: '2-digit',
-                second: '2-digit'
-            });
+            const currentHour = now.getHours();
             
             // 計算步數增量
             const stepIncrement = data.steps - lastStepCount;
@@ -253,26 +308,27 @@
             // 更新顯示
             document.getElementById('currentSteps').textContent = data.steps;
             if (stepIncrement > 0) {
+                // 更新當前小時的步數
+                const currentData = chart.data.datasets[0].data;
+                currentData[currentData.length - 1] += stepIncrement;
                 
-                // 更新圖表
+                // 將步數添加到統計數據中
                 stepsData.push({
-                    time: timeString,
+                    time: formatHourlyTime(now),
                     steps: stepIncrement
                 });
 
-                // 保留最近的10個數據點
-                if (stepsData.length > 10) {
+                // 保留最近一小時的數據
+                while (stepsData.length > 0 && 
+                       new Date(stepsData[0].time).getHours() < currentHour) {
                     stepsData.shift();
                 }
 
-                chart.data.labels = stepsData.map(d => d.time);
-                chart.data.datasets[0].data = stepsData.map(d => d.steps);
+                // 更新圖表
                 chart.update();
-            }
-            
-            // 更新高度顯示
-            if (data.height) {
-                document.getElementById('lastStepHeight').textContent = (data.height/1000.0).toFixed(2) + ' cm';
+                
+                // 更新 AI 建議
+                generateAiSuggestion(data.steps, stepsData);
             }
             
             lastStepCount = data.steps;  // 更新上一次的步數
@@ -289,18 +345,21 @@
                 document.getElementById('lastStepIncrement').textContent = stepIncrement;
             }
             
-            // 更新步伐高度
-            if (data.height) {
-                document.getElementById('lastStepHeight').textContent = data.height.toFixed(2) + ' cm';
-            }
+
         }
 
         // 連接設備
         async function connectDevice() {
             try {
+                console.log('準備連接設備...');
                 port = await navigator.serial.requestPort();
+                console.log('設備已選擇，正在開啟連接...');
                 await port.open({ baudRate: 115200 });
+                console.log('連接已開啟，準備讀取資料...');
                 reader = port.readable.getReader();
+                
+                // 更新連接狀態顯示為綠色
+                document.getElementById('connectionStatus').style.color = '#00FF00';
                 
                 // 重置所有數據
                 initConnection();
@@ -322,13 +381,23 @@
                     buffer = lines.pop();
                     
                     for (let line of lines) {
-                        try {
-                            let data = JSON.parse(line.trim());
-                            if (data.type === 'step_data') {
-                                updateChart(data);
+                        if (line.trim()) {  // 只處理非空行
+                            console.log('收到資料:', line);  // 顯示收到的原始資料
+                            try {
+                                let data = JSON.parse(line.trim());
+                                console.log('解析後的資料:', data);  // 顯示解析後的資料
+                                if (data.type === 'step_data') {
+                                    console.log('更新步數:', data.steps);  // 顯示步數更新
+                                    updateChart(data);
+                                    // 閃爍連接狀態指示燈
+                                    document.getElementById('connectionStatus').style.opacity = '0.5';
+                                    setTimeout(() => {
+                                        document.getElementById('connectionStatus').style.opacity = '1';
+                                    }, 100);
+                                }
+                            } catch (e) {
+                                console.error('解析JSON失敗:', e, '原始資料:', line);
                             }
-                        } catch (e) {
-                            console.error('解析JSON失敗:', e);
                         }
                     }
                 }
@@ -370,12 +439,13 @@
                 <canvas id="stepsChart"></canvas>
             </div>
         </section>
-        <section class="data-panel">
-            <h2>步伐高度</h2>
-            <div class="stats-grid">
-                <div class="stat-card large">
-                    <h3>最後步伐高度</h3>
-                    <div class="value" id="lastStepHeight">0.00 cm</div>
+
+        <section class="ai-analysis">
+            <h2>AI 分析建議</h2>
+            <div class="analysis-card">
+                <h3>今日運動分析</h3>
+                <div class="suggestion-content" id="aiSuggestion">
+                    正在分析您的運動數據...
                 </div>
             </div>
         </section>
