@@ -1,19 +1,17 @@
 const express = require('express');
-const WebSocket = require('ws');
 const { SerialPort } = require('serialport');
 const { ReadlineParser } = require('@serialport/parser-readline');
-const fs = require('fs');
-const path = require('path');
+const WebSocket = require('ws');
 const cors = require('cors');
 
 // 創建 Express 應用
 const app = express();
+app.use(cors());
+
+// 創建 WebSocket 服務器
 const wss = new WebSocket.Server({ port: 8080 });
 
-// 中間件設置
-app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+let currentSteps = 0;
 
 // 數據文件設置
 const DATA_FILE = path.join(__dirname, '../data/steps_data.json');
