@@ -61,12 +61,13 @@
 
         .container {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            grid-template-rows: auto auto;
+            grid-template-columns: 60% 40%;
             gap: 2rem;
             padding: 5rem 2rem 2rem;
-            max-width: 1400px;
+            max-width: 1800px;
             margin: 0 auto;
+            min-height: calc(100vh - 5rem);
+            align-items: start;
         }
 
         .data-panel {
@@ -87,12 +88,13 @@
         }
 
         .ai-analysis {
-            grid-column: 1 / -1;
             background: white;
             border-radius: 12px;
             padding: 2rem;
             box-shadow: 0 4px 6px rgba(255, 183, 77, 0.1);
             border: 1px solid var(--warm-yellow);
+            position: sticky;
+            top: 6rem;
         }
 
         .stats-grid {
@@ -171,13 +173,15 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
-        @media (max-width: 768px) {
+        @media (max-width: 1024px) {
             .container {
                 grid-template-columns: 1fr;
+                gap: 1rem;
             }
             
             .ai-analysis {
-                grid-column: 1;
+                position: relative;
+                top: 0;
             }
         }
     </style>
@@ -204,15 +208,15 @@
 
         // 生成 AI 建議
         function generateAiSuggestion(currentSteps, stepsData) {
-            const hourlySteps = stepsData.reduce((acc, data) => acc + data.steps, 0);
+            const recentSteps = stepsData.reduce((acc, data) => acc + data.steps, 0);
             let suggestion = '';
 
-            if (hourlySteps < 100) {
+            if (recentSteps < 10) {
                 suggestion = '您的活動量稍低，建議起身活動一下。適度走動可以促進血液循環，提升工作效率。';
-            } else if (hourlySteps < 300) {
-                suggestion = '維持良好的活動量！建議每小時至少活動5-10分鐘，可以預防久坐帶來的健康問題。';
+            } else if (recentSteps < 30) {
+                suggestion = '維持良好的活動量！建議持續保持這樣的運動節奏。';
             } else {
-                suggestion = '太棒了！您保持著很好的活動量。請記得在運動的同時也要注意適度休息，保持均衡。';
+                suggestion = '太棒了！您的運動強度很好。請記得運動時要注意安全，保持平穩的步伐。';
             }
 
             const timeStr = new Date().toLocaleTimeString('zh-TW', {
@@ -224,12 +228,12 @@
                 <p><strong>${timeStr} 更新</strong></p>
                 <p>${suggestion}</p>
                 <p>當前累計步數：${currentSteps} 步</p>
-                <p>最近一小時活動量：${hourlySteps} 步</p>
+                <p>最近運動強度：${recentSteps} 步/10分鐘</p>
             `;
         }
 
         // 格式化時間
-        function formatHourlyTime(date) {
+        function formatMinuteTime(date) {
             return date.toLocaleTimeString('zh-TW', {
                 hour: '2-digit',
                 minute: '2-digit'
@@ -240,24 +244,19 @@
         function initChart() {
             const ctx = document.getElementById('stepsChart').getContext('2d');
             const now = new Date();
-            const hourLabels = [];
             
-            // 生成最近12小時的標籤
-            for (let i = 11; i >= 0; i--) {
-                const time = new Date(now.getTime() - (i * 3600000));
-                hourLabels.push(formatHourlyTime(time));
-            }
-
             chart = new Chart(ctx, {
                 type: 'bar',
                 data: {
-                    labels: hourLabels,
+                    labels: [],
                     datasets: [{
-                        label: '每小時步數',
-                        data: new Array(12).fill(0),  // 初始化12小時的數據
+                        label: '每分鐘累積步數',
+                        data: [],
                         backgroundColor: 'rgba(255, 215, 0, 0.6)',
                         borderColor: 'rgba(255, 215, 0, 1)',
-                        borderWidth: 1
+                        borderWidth: 1,
+                        barPercentage: 0.8,  // 調整長條的寬度
+                        categoryPercentage: 0.9  // 調整長條之間的間距
                     }]
                 },
                 options: {
@@ -274,7 +273,7 @@
                         x: {
                             title: {
                                 display: true,
-                                text: '時間'
+                                text: '時間（最近10分鐘）'
                             }
                         }
                     },
@@ -297,36 +296,56 @@
             });
         }
 
+        // 存儲每分鐘的累積步數
+        let currentMinuteSteps = 0;
+        let lastMinute = -1;
+
         // 更新圖表數據
         function updateChart(data) {
             const now = new Date();
-            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+            const timeString = formatMinuteTime(now);
             
             // 計算步數增量
             const stepIncrement = data.steps - lastStepCount;
             
-            // 更新顯示
+            // 更新總步數顯示
             document.getElementById('currentSteps').textContent = data.steps;
-            if (stepIncrement > 0) {
-                // 更新當前小時的步數
-                const currentData = chart.data.datasets[0].data;
-                currentData[currentData.length - 1] += stepIncrement;
-                
-                // 將步數添加到統計數據中
-                stepsData.push({
-                    time: formatHourlyTime(now),
-                    steps: stepIncrement
-                });
 
-                // 保留最近一小時的數據
-                while (stepsData.length > 0 && 
-                       new Date(stepsData[0].time).getHours() < currentHour) {
-                    stepsData.shift();
+            if (stepIncrement > 0) {
+                // 如果是新的一分鐘，保存上一分鐘的數據並重置計數器
+                if (lastMinute !== currentMinute) {
+                    if (lastMinute !== -1) {  // 不是第一次更新
+                        // 保存上一分鐘的數據
+                        stepsData.push({
+                            time: timeString,
+                            steps: currentMinuteSteps
+                        });
+
+                        // 只保留最近10分鐘的數據
+                        if (stepsData.length > 10) {
+                            stepsData.shift();
+                        }
+
+                        // 更新圖表
+                        chart.data.labels = stepsData.map(d => d.time);
+                        chart.data.datasets[0].data = stepsData.map(d => d.steps);
+                        chart.update();
+                    }
+                    // 重置新一分鐘的計數
+                    currentMinuteSteps = stepIncrement;
+                    lastMinute = currentMinute;
+                } else {
+                    // 在當前分鐘內累加步數
+                    currentMinuteSteps += stepIncrement;
+                    
+                    // 更新圖表最後一個數據點
+                    if (stepsData.length > 0) {
+                        chart.data.datasets[0].data[chart.data.datasets[0].data.length - 1] = currentMinuteSteps;
+                        chart.update('none');  // 使用 'none' 模式更新以提高性能
+                    }
                 }
 
-                // 更新圖表
-                chart.update();
-                
                 // 更新 AI 建議
                 generateAiSuggestion(data.steps, stepsData);
             }
@@ -440,15 +459,23 @@
             </div>
         </section>
 
-        <section class="ai-analysis">
-            <h2>AI 分析建議</h2>
+        <div class="ai-analysis">
+            <h2>即時運動分析</h2>
             <div class="analysis-card">
-                <h3>今日運動分析</h3>
+                <h3>AI 智能建議</h3>
                 <div class="suggestion-content" id="aiSuggestion">
-                    正在分析您的運動數據...
+                    正在連接設備並分析數據...
                 </div>
             </div>
-        </section>
+            <div class="analysis-card" style="margin-top: 1rem;">
+                <h3>小提醒</h3>
+                <div class="suggestion-content">
+                    <p>• 保持正確的運動姿勢</p>
+                    <p>• 注意運動強度的均衡</p>
+                    <p>• 如果感到不適請立即停止</p>
+                </div>
+            </div>
+        </div>
     </main>
 
 
