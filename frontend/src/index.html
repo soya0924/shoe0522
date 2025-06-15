@@ -5,9 +5,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.5.2/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.5.2/firebase-database-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.5.2/firebase-analytics-compat.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -184,53 +181,206 @@
             }
         }
     </style>
+    <script>
+        // 全域變數
+        let port;
+        let reader;
+        let chart;
+        let stepsData = [];
+        let lastStepCount = 30;  // 從30步開始計算
+        let initialSteps = 30;   // 初始步數設定
+        
+        // 初始化連接狀態
+        function initConnection() {
+            document.getElementById('currentSteps').textContent = '0';
+            document.getElementById('lastStepHeight').textContent = '0.00 cm';
+            lastStepCount = 0;
+            stepsData = [];
+            if (chart && chart.data) {
+                chart.data.labels = [];
+                chart.data.datasets[0].data = [];
+                chart.update();
+            }
+        }
+
+        // 初始化圖表
+        function initChart() {
+            const ctx = document.getElementById('stepsChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: '單次步數',
+                        data: [],
+                        backgroundColor: 'rgba(255, 215, 0, 0.6)',  // 使用金黃色
+                        borderColor: 'rgba(255, 215, 0, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+        }
+
+        // 更新圖表數據
+        function updateChart(data) {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('zh-TW', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            
+            // 計算步數增量
+            const stepIncrement = data.steps - lastStepCount;
+            
+            // 更新顯示
+            document.getElementById('currentSteps').textContent = data.steps;
+            if (stepIncrement > 0) {
+                
+                // 更新圖表
+                stepsData.push({
+                    time: timeString,
+                    steps: stepIncrement
+                });
+
+                // 保留最近的10個數據點
+                if (stepsData.length > 10) {
+                    stepsData.shift();
+                }
+
+                chart.data.labels = stepsData.map(d => d.time);
+                chart.data.datasets[0].data = stepsData.map(d => d.steps);
+                chart.update();
+            }
+            
+            // 更新高度顯示
+            if (data.height) {
+                document.getElementById('lastStepHeight').textContent = (data.height/1000.0).toFixed(2) + ' cm';
+            }
+            
+            lastStepCount = data.steps;  // 更新上一次的步數
+        }
+
+        // 更新數據顯示
+        function updateStats(data) {
+            // 更新累計總步數
+            document.getElementById('currentSteps').textContent = data.steps;
+            
+            // 更新最後一次步數增量
+            const stepIncrement = data.steps - lastStepCount;
+            if (stepIncrement > 0) {
+                document.getElementById('lastStepIncrement').textContent = stepIncrement;
+            }
+            
+            // 更新步伐高度
+            if (data.height) {
+                document.getElementById('lastStepHeight').textContent = data.height.toFixed(2) + ' cm';
+            }
+        }
+
+        // 連接設備
+        async function connectDevice() {
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 115200 });
+                reader = port.readable.getReader();
+                
+                // 重置所有數據
+                initConnection();
+                
+                document.getElementById('connectionStatus').textContent = '已連接';
+                document.getElementById('connectButton').disabled = true;
+
+                let decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value);
+                    let lines = buffer.split('\n');
+                    
+                    // 處理完整的行，保留最後一個不完整的行
+                    buffer = lines.pop();
+                    
+                    for (let line of lines) {
+                        try {
+                            let data = JSON.parse(line.trim());
+                            if (data.type === 'step_data') {
+                                updateChart(data);
+                            }
+                        } catch (e) {
+                            console.error('解析JSON失敗:', e);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('連接錯誤:', error);
+                document.getElementById('connectionStatus').textContent = '連接失敗: ' + error.message;
+            }
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            initChart();  // 先初始化圖表
+            initConnection();  // 初始化連接狀態
+            
+            // 設置連接按鈕事件
+            document.getElementById('connectButton').addEventListener('click', connectDevice);
+        });
+    </script>
 </head>
 <body>
     <header class="header">
         <h1>智慧步數分析系統</h1>
-        <div class="profile">
-            <span class="user-name">使用者名稱</span>
-            <div class="avatar">
-                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23ccc' d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z'/%3E%3C/svg%3E" alt="使用者頭像">
-            </div>
-        </div>
+        <button id="connectButton" style="background: var(--primary-yellow); padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; margin-left: 20px;">
+            連接裝置
+        </button>
+        <span id="connectionStatus" style="margin-left: 10px;">未連接</span>
     </header>
 
     <main class="container">
         <section class="data-panel">
-            <h2>即時步數統計</h2>
-            <div class="chart-container">
-                <canvas id="minuteStepsChart"></canvas>
-            </div>
-        </section>
-
-        <section class="data-panel">
-            <h2>本週運動量</h2>
-            <div class="chart-container">
-                <canvas id="weeklyStepsChart"></canvas>
-            </div>
-        </section>
-
-        <section class="ai-analysis">
-            <h2>AI 分析與建議</h2>
+            <h2>步數統計</h2>
             <div class="stats-grid">
                 <div class="stat-card large">
-                    <h3>今日步數</h3>
-                    <div class="value" id="todaySteps">0</div>
-                </div>
-                <div class="stat-card large">
-                    <h3>週平均步數</h3>
-                    <div class="value" id="weeklyAverage">0</div>
+                    <h3>累計總步數</h3>
+                    <div class="value" id="currentSteps">0</div>
                 </div>
             </div>
-            <div class="analysis-card">
-                <h3>運動建議</h3>
-                <div id="aiSuggestions" class="suggestion-content"></div>
+            <div class="chart-container">
+                <canvas id="stepsChart"></canvas>
+            </div>
+        </section>
+        <section class="data-panel">
+            <h2>步伐高度</h2>
+            <div class="stats-grid">
+                <div class="stat-card large">
+                    <h3>最後步伐高度</h3>
+                    <div class="value" id="lastStepHeight">0.00 cm</div>
+                </div>
             </div>
         </section>
     </main>
 
-    <script src="firebase-config.js"></script>
-    <script src="app.js"></script>
+
 </body>
 </html>

@@ -4,7 +4,7 @@
 MPU6050 mpu;
 int16_t ax, ay, az;
 int steps = 0;
-unsigned long lastStepTime = 0;
+unsigned long lastStepTime = 0;  // 用於計算步數間隔的時間戳記變數
 
 // 用來做簡易移動平均的陣列與指標
 #define SMOOTH_SIZE 5
@@ -19,7 +19,7 @@ bool peakDetected = false;
 
 // 步伐判斷門檻
 const float HEIGHT_THRESHOLD = 1000.0;   // 最小高度差檢測（約1公分）
-const float MIN_VALID_HEIGHT = 10000.0;  // 最小有效步伐高度（約10公分）
+const float MIN_VALID_HEIGHT = 3000.0;  // 最小有效步伐高度（約10公分）
 const float NOISE_THRESHOLD = 500.0;     // 雜訊閾值，降低以提高靈敏度
 
 // 間隔時間限制，避免重複計步(ms)
@@ -36,12 +36,13 @@ float getAverageZ() {
 void setup() {
   Wire.begin();
   Serial.begin(115200);
+  delay(1000);  // 等待序列埠穩定
 
   mpu.initialize();
   if (mpu.testConnection()) {
-    Serial.println("{\"status\":\"connected\",\"message\":\"MPU6050 初始化成功\"}");
+    Serial.println(F("MPU6050 初始化成功"));
   } else {
-    Serial.println("{\"status\":\"error\",\"message\":\"MPU6050 連接失敗\"}"); 
+    Serial.println(F("MPU6050 連接失敗")); 
     while (1);
   }
 }
@@ -94,35 +95,21 @@ void loop() {
             steps++;
             lastStepTime = now;
 
-            // 發送 JSON 格式的步數數據（有效步伐）
+            // 輸出JSON格式的步數數據
             String jsonMessage = "{\"type\":\"step_data\",\"steps\":" + String(steps) + 
-                               ",\"height\":" + String(totalHeight/1000.0, 2) +
-                               ",\"valid\":true}";
+                               ",\"height\":" + String(totalHeight/1000.0, 2) + 
+                               ",\"timestamp\":" + String(millis()) + "}";
             Serial.println(jsonMessage);
-            BTSerial.println(jsonMessage);
-            
-            // 顯示目前累計的有效步數
-            Serial.print("目前步數: ");
-            Serial.print(steps);
-            Serial.println(" 步");
-            
-            // 透過藍牙發送步數顯示訊息
-            String stepDisplay = String(steps) + "步";
-            BTSerial.println(stepDisplay);
+          
           } else {
-            // 發送未達到有效高度的資訊
-            String jsonMessage = "{\"steps\":" + String(steps) + 
-                               ",\"height\":" + String(totalHeight/1000.0, 2) +
-                               ",\"valid\":false,\"cycle\":\"too_low\"}";
-            Serial.println(jsonMessage);
-            BTSerial.println(jsonMessage);
+            // 步伐高度不足的提示
+            Serial.print(F("步伐高度不足 ("));
+            Serial.print(totalHeight/1000.0, 2);
+            Serial.println(F("cm)"));
           }
 
           // 重置週期
           cycleStarted = false;
-          
-          // Debug 資訊
-          Serial.print("週期高度: "); Serial.println(totalHeight);
         }
       }
     }
