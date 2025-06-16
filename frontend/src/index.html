@@ -296,15 +296,14 @@
             });
         }
 
-        // 存儲每分鐘的累積步數
-        let currentMinuteSteps = 0;
-        let lastMinute = -1;
+        // 存儲每分鐘的步數數據
+        let minuteSteps = new Map();
+        let lastTimeKey = null;
 
         // 更新圖表數據
         function updateChart(data) {
             const now = new Date();
-            const currentMinute = now.getMinutes();
-            const timeString = formatMinuteTime(now);
+            const timeKey = formatMinuteTime(now);
             
             // 計算步數增量
             const stepIncrement = data.steps - lastStepCount;
@@ -313,41 +312,44 @@
             document.getElementById('currentSteps').textContent = data.steps;
 
             if (stepIncrement > 0) {
-                // 如果是新的一分鐘，保存上一分鐘的數據並重置計數器
-                if (lastMinute !== currentMinute) {
-                    if (lastMinute !== -1) {  // 不是第一次更新
-                        // 保存上一分鐘的數據
-                        stepsData.push({
-                            time: timeString,
-                            steps: currentMinuteSteps
-                        });
-
-                        // 只保留最近10分鐘的數據
-                        if (stepsData.length > 10) {
-                            stepsData.shift();
-                        }
-
-                        // 更新圖表
-                        chart.data.labels = stepsData.map(d => d.time);
-                        chart.data.datasets[0].data = stepsData.map(d => d.steps);
-                        chart.update();
-                    }
-                    // 重置新一分鐘的計數
-                    currentMinuteSteps = stepIncrement;
-                    lastMinute = currentMinute;
+                // 初始化或更新當前分鐘的步數
+                if (!minuteSteps.has(timeKey)) {
+                    minuteSteps.set(timeKey, 1);  // 新的一分鐘，從1開始計數
                 } else {
-                    // 在當前分鐘內累加步數
-                    currentMinuteSteps += stepIncrement;
-                    
-                    // 更新圖表最後一個數據點
-                    if (stepsData.length > 0) {
-                        chart.data.datasets[0].data[chart.data.datasets[0].data.length - 1] = currentMinuteSteps;
-                        chart.update('none');  // 使用 'none' 模式更新以提高性能
-                    }
+                    minuteSteps.set(timeKey, minuteSteps.get(timeKey) + 1);  // 增加一步
                 }
 
+                // 如果是新的一分鐘
+                if (timeKey !== lastTimeKey) {
+                    // 移除舊數據，保持最近10分鐘的記錄
+                    const entries = Array.from(minuteSteps.entries());
+                    while (entries.length > 10) {
+                        minuteSteps.delete(entries[0][0]);
+                        entries.shift();
+                    }
+                    lastTimeKey = timeKey;
+                }
+
+                // 更新圖表
+                const labels = Array.from(minuteSteps.keys());
+                const stepsData = Array.from(minuteSteps.values());
+
+                chart.data.labels = labels;
+                chart.data.datasets[0].data = stepsData;
+                chart.update('none');  // 使用 'none' 模式更新以提高性能
+
                 // 更新 AI 建議
-                generateAiSuggestion(data.steps, stepsData);
+                generateAiSuggestion(data.steps, Array.from(minuteSteps.entries()).map(([time, steps]) => ({
+                    time: time,
+                    steps: steps
+                })));
+
+                // 在控制台輸出調試信息
+                console.log('目前步數數據:', {
+                    timeKey,
+                    currentSteps: minuteSteps.get(timeKey),
+                    allData: Object.fromEntries(minuteSteps)
+                });
             }
             
             lastStepCount = data.steps;  // 更新上一次的步數
